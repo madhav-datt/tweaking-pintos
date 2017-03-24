@@ -21,8 +21,11 @@
 #define THREAD_MAGIC 0xcd6abf4b
 
 /* List of processes in THREAD_READY state, that is, processes
-   that are ready to run but not actually running. */
-static struct list ready_list;
+   that are ready to run but not actually running.
+   Level 1 and level 2 lists to implement multilevel feedback
+   queue based scheduler. */
+static struct list ready_list_level_1;
+static struct list ready_list_level_2;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -90,7 +93,8 @@ thread_init (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   lock_init (&tid_lock);
-  list_init (&ready_list);
+  list_init (&ready_list_level_1);
+  list_init (&ready_list_level_2);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -135,8 +139,40 @@ thread_tick (void)
     kernel_ticks++;
 
   /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
+  /* Preempt level 1 thread at TIME_SLICE and level 2 thread at 2 * TIME_SLICE. */
+  thread_ticks++;
+
+  /* Iterate over level 2 ready list and increment wait time quanta if level 1 list is not empty. */
+  if (!list_empty (&ready_list_level_1) && thread_ticks >= TIME_SLICE)
+  {
+    struct list_elem* e;
+    for (e = list_begin (&ready_list_level_2); e != list_end (&ready_list_level_2); e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, allelem);
+      t->level_2_wait_quanta++;
+
+      /* Move thread to level 1 if waiting time exceeds 6 time quanta. */
+      if (t->level_2_wait_quanta >= 6)
+      {
+        t->level_2_wait_quanta = 0;
+        t->level = FIRST;
+        list_remove (&t->elem);                             /* Remove thread from (current) level 2 ready list. */
+        list_push_back (&ready_list_level_1, &t->elem);     /* Add thread to back of level 1 ready list. */
+      }
+    }
+  }
+
+  if (t->level == FIRST && thread_ticks >= TIME_SLICE)
+  {
+    t->level_1_run_quanta++;
     intr_yield_on_return ();
+  }
+  else if (t->level == SECOND && thread_ticks >= 2 * TIME_SLICE)
+  {
+    /* Reset thread total waiting time when it gets scheduled. */
+    t->level_2_wait_quanta = 0;
+    intr_yield_on_return ();
+  }
 }
 
 /* Prints thread statistics. */
@@ -245,7 +281,14 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+
+  /* Add unblocked thread to back of ready_list based on level.
+     This does not alter the level of the blocked thread. */
+  if (t->level == FIRST)
+    list_push_back (&ready_list_level_1, &t->elem);
+  else if (t->level == SECOND)
+    list_push_back (&ready_list_level_2, &t->elem);
+
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -315,8 +358,23 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread)
+  {
+    /* Add running thread to back of ready_list based on level.
+       This does not alter the level of the thread yielding CPU time. */
+
+    /* Push to back of level 2 ready list if level 1 time quanta exceeds 2. */
+    if (cur->level == FIRST && cur->level_1_run_quanta >= 2)
+    {
+        cur->level_1_run_quanta = 0;
+        cur->level = SECOND;
+        list_push_back (&ready_list_level_2, &cur->elem);
+    }
+    else if (cur->level == FIRST)
+      list_push_back (&ready_list_level_1, &cur->elem);
+    else if (cur->level == SECOND)
+      list_push_back (&ready_list_level_2, &cur->elem);
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -469,6 +527,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  /* Initialize added fields from thread struct. */
+  t->level = FIRST;
+  t->level_1_run_quanta = 0;
+  t->level_2_wait_quanta = 0;
+
   list_push_back (&all_list, &t->allelem);
 }
 
@@ -493,10 +557,16 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list))
+  /* Return idle_thread if both ready list levels are empty. */
+  if (list_empty (&ready_list_level_1) && list_empty (&ready_list_level_2))
     return idle_thread;
+
+  /* Return thread from second level if level 1 list is empty. */
+  else if (list_empty (&ready_list_level_1))
+    return list_entry (list_pop_front (&ready_list_level_2), struct thread, elem);
+
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    return list_entry (list_pop_front (&ready_list_level_1), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page

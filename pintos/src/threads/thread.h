@@ -14,6 +14,13 @@ enum thread_status
     THREAD_DYING        /* About to be destroyed. */
   };
 
+/* States marking thread's queue level status. */
+enum thread_level
+  {
+    FIRST,              /* Thread is in level 1 queue. */
+    SECOND              /* Thread is in level 2 queue. */
+  };
+
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -100,6 +107,17 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+    /* Newly added struct members start here */
+
+    enum thread_level level;            /* Current thread level. */
+
+    /* One of level_2_wait_quanta and level_1_run_quanta is always zero
+       based on current ready queue level the thread is present in.
+       If thread_level level is 1, the variable corresponding to level 2
+       is zero and vice-verse. */
+    int level_2_wait_quanta;            /* Time quanta spent waiting in level 2 queue */
+    int level_1_run_quanta;             /* Time quanta spent running in level 1 queue */
   };
 
 /* If false (default), use round-robin scheduler.
