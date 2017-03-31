@@ -56,6 +56,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+static unsigned clock_ticks;    /* # of timer ticks since creation of first tick. */
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -141,6 +142,16 @@ thread_tick (void)
     /* Enforce preemption. */
     /* Preempt level 1 thread at TIME_SLICE and level 2 thread at 2 * TIME_SLICE. */
     thread_ticks++;
+    clock_ticks++;      /* Increment clock ticks from start of time. */
+
+    /* Thread moved from level 1 or level 2 ready queues to running state. */
+    if (thread_ticks == 1)
+    {
+        if (t->level == FIRST)
+            printf("%d: thread %d goes to %s from %s\n", clock_ticks, t->tid, "running state", "L1 queue");
+        else if (t->level == SECOND)
+            printf("%d: thread %d goes to %s from %s\n", clock_ticks, t->tid, "running state", "L2 queue");
+    }
 
     /* Iterate over level 2 ready list and increment wait time quanta if level 1 list is not empty. */
     if (!list_empty (&ready_list_level_1))
@@ -150,7 +161,6 @@ thread_tick (void)
         {
             struct thread* t = list_entry (e, struct thread, elem);
             t->level_2_wait_quanta++;
-            printf("\n%d Thread ID : %d age in level 2 at %d\n",__LINE__,t->tid,t->level_2_wait_quanta);
 
             /* Move thread to level 1 if waiting time exceeds 6 time quanta. */
             if (t->level_2_wait_quanta >= 6 * TIME_SLICE)
@@ -161,31 +171,25 @@ thread_tick (void)
                 /* Remove thread from (current) level 2 ready list. */
                 e = list_remove (&t->elem);
                 list_push_back (&ready_list_level_1, &t->elem);     /* Add thread to back of level 1 ready list. */
-                printf("\n%d Thread ID : %d moves from List 2 to List 1\n",__LINE__,t->tid);
+                printf("%d: thread %d goes to %s from %s\n", clock_ticks, t->tid, "L1 queue", "L2 queue");
             }
             else
-            {
                 e = list_next(e);
-            }
         }
     }
 
     if (t->level == FIRST)
     {
         t->level_1_run_quanta++;
-        printf("\n%d Thread ID : %d ticks in level 1 at %d\n",__LINE__,t->tid,t->level_1_run_quanta);
-        if(t->level_1_run_quanta>=2*TIME_SLICE||thread_ticks >= TIME_SLICE){
+        if(t->level_1_run_quanta >= 2 * TIME_SLICE || thread_ticks >= TIME_SLICE)
             intr_yield_on_return ();
-        }
     }
     else if (t->level == SECOND)
     {
         /* Reset thread total waiting time when it gets scheduled. */
         t->level_2_wait_quanta = 0;
-        printf("\n%d Thread ID : %d resets ticks for level 2\n",__LINE__,t->tid);
-        if(thread_ticks >= 2 * TIME_SLICE){
+        if(thread_ticks >= 2 * TIME_SLICE)
             intr_yield_on_return ();
-        }
     }
 }
 
@@ -233,7 +237,7 @@ thread_create (const char *name, int priority,
     /* Initialize thread. */
     init_thread (t, name, priority);
     tid = t->tid = allocate_tid ();
-    printf("\n%d Initializing thread ID : %d\n",__LINE__,t->tid);
+    printf("%d: thread %d created and in blocked state\n", clock_ticks, t->tid);
 
     /* Prepare thread for first run by initializing its stack.
        Do this atomically so intermediate values for the 'stack'
@@ -274,7 +278,10 @@ thread_block (void)
 {
     ASSERT (!intr_context ());
     ASSERT (intr_get_level () == INTR_OFF);
-
+    if (thread_current ()->level == FIRST)
+        printf("%d: thread %d goes to blocked state from %s\n", clock_ticks, thread_current ()->tid, "L1 queue");
+    else if (thread_current ()->level == SECOND)
+        printf("%d: thread %d goes to blocked state from %s\n", clock_ticks, thread_current ()->tid, "L2 queue");
     thread_current ()->status = THREAD_BLOCKED;
     schedule ();
 }
@@ -302,12 +309,12 @@ thread_unblock (struct thread *t)
     if (t->level == FIRST)
     {
         list_push_back (&ready_list_level_1, &t->elem);
-        printf("\n%d Thread ID : %d gets re-added to level 1\n",__LINE__,t->tid);
+        printf("%d: thread %d goes to %s from %s\n", clock_ticks, t->tid, "L1 queue", "blocked state");
     }
     else if (t->level == SECOND)
     {
         list_push_back (&ready_list_level_2, &t->elem);
-        printf("\n%d Thread ID : %d gets re-added to level 2\n",__LINE__,t->tid);
+        printf("%d: thread %d goes to %s from %s\n", clock_ticks, t->tid, "L2 queue", "blocked state");
     }
 
     t->status = THREAD_READY;
@@ -352,7 +359,7 @@ thread_tid (void)
 void
 thread_exit (void)
 {
-    printf("\n%d Thread ID : %d exits\n",__LINE__,thread_current()->tid);
+    printf("%d: thread %d finished\n", clock_ticks, thread_current()->tid);
     ASSERT (!intr_context ());
 
 #ifdef USERPROG
@@ -380,7 +387,6 @@ thread_yield (void)
     ASSERT (!intr_context ());
 
     old_level = intr_disable ();
-    printf("\n%d Thread ID %d yields",__LINE__,cur->tid);
     if (cur != idle_thread)
     {
         /* Add running thread to back of ready_list based on level.
@@ -392,23 +398,24 @@ thread_yield (void)
             cur->level_1_run_quanta = 0;
             cur->level = SECOND;
             list_push_back (&ready_list_level_2, &cur->elem);
-            printf("\n%d Thread ID : %d gets added to level 2\n",__LINE__,cur->tid);
+            printf("%d: thread %d goes to %s from %s\n", clock_ticks, cur->tid, "L2 queue", "running state");
         }
         else if (cur->level == FIRST)
         {
             list_push_back (&ready_list_level_1, &cur->elem);
-            printf("\n%d Thread ID : %d gets re-added to level 1\n",__LINE__,cur->tid);
+            printf("%d: thread %d goes to %s from %s\n", clock_ticks, cur->tid, "L1 queue", "running state");
         }
-        else if (cur->level == SECOND && cur->level_2_wait_quanta >= 6*TIME_SLICE)
+        else if (cur->level == SECOND && cur->level_2_wait_quanta >= 6 * TIME_SLICE)
         {
             cur->level_2_wait_quanta = 0;
             cur->level = FIRST;
             list_push_back (&ready_list_level_1, &cur->elem);     /* Add thread to back of level 1 ready list. */
-            printf("\n%d Thread ID : %d moves from List 2 to List 1\n",__LINE__,cur->tid);
+            printf("%d: thread %d goes to %s from %s\n", clock_ticks, cur->tid, "L1 queue", "running state");
         }
-        else if (cur->level == SECOND){
+        else if (cur->level == SECOND)
+        {
             list_push_back (&ready_list_level_2, &cur->elem);
-            printf("\n%d Thread ID : %d gets re-added to level 2\n",__LINE__,cur->tid);
+            printf("%d: thread %d goes to %s from %s\n", clock_ticks, cur->tid, "L1 queue", "L2 queue");
         }
     }
     cur->status = THREAD_READY;
@@ -602,7 +609,7 @@ next_thread_to_run (void)
         return list_entry (list_pop_front (&ready_list_level_2), struct thread, elem);
 
     else
-    return list_entry (list_pop_front (&ready_list_level_1), struct thread, elem);
+        return list_entry (list_pop_front (&ready_list_level_1), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
