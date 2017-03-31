@@ -102,12 +102,11 @@ malloc (size_t size)
     struct arena* arena_obj = NULL;
     struct block* block_obj = NULL;
 
-
-    /* A null pointer satisfies arena_obj request for 0 bytes. */
+    /* A null pointer satisfies a request for 0 bytes. */
     if (size == 0)
         return block_obj;
 
-    /* Find the smallest descriptor that satisfies arena_obj SIZE-byte
+    /* Find the smallest descriptor that satisfies a SIZE-byte
        request. */
 
     /* Directly return arena of minimum available size for request, else request new page
@@ -117,8 +116,7 @@ malloc (size_t size)
     {
         if (desc_obj->block_size >= size)
         {
-            bool empty_list = list_empty (&(descs + block_count)->free_list);
-            while(empty_list && ((descs + block_count) < descs + desc_cnt))
+            while(list_empty(&(descs+block_count)->free_list) && (descs+block_count) < descs + desc_cnt)
                 block_count++;
             break;
         }
@@ -304,49 +302,49 @@ free (void *p)
     int i = 0;
     bool buddy_found_flag = false;
 
-    struct arena* free_arena = (struct arena*) p;
+    struct arena *free_arena = (struct arena *) p;
     free_arena--;
     if (free_arena->num_pages > 0)
     {
         // Free all associated pages
-        palloc_free_multiple (free_arena, free_arena->num_pages);
+        palloc_free_multiple(free_arena, free_arena->num_pages);
         return;
     }
 
-    struct block* block_obj = (struct block*) p;
-    free_arena = block_to_arena(block_obj , block_obj->size);
-    struct list_elem* element;
+    struct block *block_obj = (struct block *) p;
+    free_arena = block_to_arena(block_obj, block_obj->size);
+    struct list_elem *element;
 
     while ((descs + i)->block_size < block_obj->size)
         i = i + 1;
 
-    while(i < (int) desc_cnt)
+    while (i < (int) desc_cnt)
     {
-        struct block* tmp_block;
-        int arena_index = (pg_ofs (block_obj) - sizeof *free_arena) / block_obj->size;
+        struct block *tmp_block;
+        int arena_index = (pg_ofs(block_obj) - sizeof *free_arena) / block_obj->size;
         int buddy_arena_index = arena_index - 1;
 
         // Get buddy arena index
-        if((arena_index & 1) == 0)
+        if ((arena_index & 1) == 0)
             buddy_arena_index = arena_index + 1;
 
         // Iterate over list to identify buddy block
-        struct block* buddy_block = arena_to_block(free_arena , (size_t) buddy_arena_index, descs + i);
-        for(element = list_begin (&((descs + i)->free_list)); element != list_end (&((descs + i)->free_list));
-            element = list_next (element))
+        struct block *buddy_block = arena_to_block(free_arena, (size_t) buddy_arena_index, descs + i);
+        for (element = list_begin(&((descs + i)->free_list)); element != list_end(&((descs + i)->free_list));
+             element = list_next(element))
         {
-            tmp_block = list_entry (element, struct block, free_elem);
-            if(tmp_block == buddy_block)
+            tmp_block = list_entry(element, struct block, free_elem);
+            if (tmp_block == buddy_block)
                 buddy_found_flag = true;
             if (buddy_found_flag)
                 break;
         }
 
         // Remove buddy block
-        if(buddy_found_flag)
+        if (buddy_found_flag)
         {
             i = i + 1;
-            list_remove (element);
+            list_remove(element);
             if ((arena_index & 1) != 0)
             {
                 buddy_block->size *= 2;
@@ -358,10 +356,10 @@ free (void *p)
             buddy_found_flag = false;
         }
 
-            // Remove self block
+        // Remove self block
         else
         {
-            list_push_back(&((descs + i)->free_list) , &block_obj->free_elem);
+            list_push_back(&((descs + i)->free_list), &block_obj->free_elem);
             break;
         }
     }
@@ -369,8 +367,8 @@ free (void *p)
     // Handle case where full page is returned
     if (i == (int) desc_cnt)
     {
-        list_remove (&free_arena->elem_arena);
-        palloc_free_multiple (free_arena , 1);
+        list_remove(&free_arena->elem_arena);
+        palloc_free_multiple(free_arena, 1);
     }
 }
 
@@ -403,7 +401,7 @@ arena_to_block (struct arena *a, size_t idx , struct desc *d)
 /* Prints free memory block list of each page
    by memory block size. */
 void
-print_memory (void)
+printMemory (void)
 {
     int page_count = 0;
     printf("---------------------------------\n");
@@ -422,6 +420,7 @@ print_memory (void)
         tmp_elem_1 = list_next (tmp_elem_1), page_count++)
     {
         struct arena* tmp_arena = list_entry (tmp_elem_1, struct arena, elem_arena);
+        printf("---------------------------------\n");
         printf("Page %2d:\n", page_count);
         printf("Page address %6u\n", (unsigned int) tmp_arena);
         printf("---------------------------------\n");

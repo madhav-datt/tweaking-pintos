@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 /* Print memory function */
-void print_memory(void);
+void printMemory(void);
 
 void malloc_init (void);
 void *malloc (size_t) __attribute__ ((malloc));
