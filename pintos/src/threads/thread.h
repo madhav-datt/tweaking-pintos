@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/signal.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -12,13 +13,6 @@ enum thread_status
     THREAD_READY,       /* Not running but ready to run. */
     THREAD_BLOCKED,     /* Waiting for an event to trigger. */
     THREAD_DYING        /* About to be destroyed. */
-  };
-
-/* States marking thread's queue level status. */
-enum thread_level
-  {
-    FIRST,              /* Thread is in level 1 queue. */
-    SECOND              /* Thread is in level 2 queue. */
   };
 
 /* Thread identifier type.
@@ -108,22 +102,32 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
 
-    /* Newly added struct members start here */
+    /* Parent thread pointer. */
+    struct thread* parent_thread;
+    struct list children_list;
+    bool is_parent;
 
-    enum thread_level level;            /* Current thread level. */
+    /* Fields to set process thread lifetime. */
+    long long int thread_life_time;
+    long long int thread_total_time;
+    bool is_life_over;
 
-    /* One of level_2_wait_quanta and level_1_run_quanta is always zero
-       based on current ready queue level the thread is present in.
-       If thread_level level is 1, the variable corresponding to level 2
-       is zero and vice-verse. */
-    int level_2_wait_quanta;            /* Time quanta spent waiting in level 2 queue */
-    int level_1_run_quanta;             /* Time quanta spent running in level 1 queue */
+    struct list_elem child_elem;        /* Element in child list of parent. */
+    struct list_elem unblock_elem;      /* Element in unblock list for thread. */
+
+    /* Child process counters. */
+    unsigned int total_children;
+    unsigned int alive_children;
+
+    struct list pending_signals;        /* Pending signals list. */
+    unsigned short sigmask;
   };
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+extern struct list unblock_list;
 
 void thread_init (void);
 void thread_start (void);
@@ -139,6 +143,7 @@ void thread_unblock (struct thread *);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
+struct thread* validated_tid (int tid);
 const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
@@ -155,5 +160,8 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/* Function to set lifetime. */
+void setlifetime(unsigned long long int lifetime);
 
 #endif /* threads/thread.h */
